@@ -1,0 +1,7 @@
+*.zip
+test/
+test_degradato/
+train/
+valid/
+sports_labels.csv
+*.asv
