@@ -100,3 +100,18 @@ title(["Accuracy: " num2str(accuracy)])
 
 % Computing accuracy
 numel(find(predictedLabels == testLabels)) / numel(predictedLabels)
+
+%% Degraded test set classification
+path_degraded = "./test_degradato/";
+degradedDatastore = imageDatastore(path_degraded, IncludeSubfolders=true, Labels=testLabels);
+resizedDegradedDatastore = augmentedImageDatastore(inputSize, degradedDatastore, ColorPreprocessing="gray2rgb");
+
+[predictedLabels, scores] = classify(model, resizedDegradedDatastore);
+CM = confusionmat(testLabels, predictedLabels);
+CM = CM ./ repmat(sum(CM, 2), 1, size(CM, 2));
+accuracy = mean(diag(CM));
+figure(1), clf
+imagesc(CM), colorbar
+title(["Accuracy: " num2str(accuracy)])
+
+numel(find(predictedLabels == testLabels)) / numel(predictedLabels)
