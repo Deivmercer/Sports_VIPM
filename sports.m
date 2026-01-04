@@ -1,14 +1,29 @@
-clear
 close all
+clear
 clc
 
 net = alexnet;
+sz = net.Layers(1).InputSize;
 analyzeNetwork(net)
-inputSize = net.Layers(1).InputSize;
+
+%% ============================================================================
+%% BLOCCO 1: PREPARAZIONE RETE
+%% ============================================================================
+
+
+layersTransfer_M1 = net.Layers(1:end-3);
+layersTransfer_M1 = freezeWeights(layersTransfer_M1);
+
+layersTransfer_M2 = net.Layers(1:end-8);
+layersTransfer_M2 = freezeWeights(layersTransfer_M2);
+
+numClasses = 100;
+
+%% ============================================================================
+%% BLOCCO 2: LOADING DATASET
+%% ============================================================================
 labelsMatrix = readmatrix("sports_labels.csv", OutputType="string");
 
-%% Loading the training set
-display("Loading the training set")
 trainingSet = labelsMatrix(labelsMatrix(:, 4) == "train", 1:2);
 trainingLabels = categorical(trainingSet(:, 1));
 trainingImages = replace(trainingSet(:, 2), "/", filesep);
@@ -16,186 +31,210 @@ trainingImages = string(pwd()) + filesep + trainingImages;
 path_db = "./train/";
 trainingDatastore = imageDatastore(path_db, IncludeSubfolders=true);
 
-% Removing unlabled/invalid images
-display("Removing unlabled/invalid images")
 [~, trainingIndices] = ismember(trainingImages, trainingDatastore.Files);
 trainingIndices = trainingIndices(trainingIndices > 0);
 trainingLabels = trainingLabels(trainingIndices);
 
-% Creating the new datastore
-display("Creating the new datastore")
 subsetDatastore = subset(trainingDatastore, trainingIndices);
 subsetDatastore.Labels = trainingLabels;
 
-% Creating the augmentedImageDatastore
-display("Creating the augmentedImageDatastore")
-imageAugmenter = imageDataAugmenter( ...
-    'RandRotation', [-20, 20], ...
-    'RandXReflection', true, ...
-    'RandXTranslation', [-10, 10], ...
-    'RandYTranslation', [-10, 10], ...
-    'RandScale', [0.8, 1.2]);
-resizedTrainingDatastore = augmentedImageDatastore(inputSize, subsetDatastore, ColorPreprocessing="gray2rgb");
-
-%% Loading the validation set
-display("Loading the validation set")
 validationSet = labelsMatrix(labelsMatrix(:, 4) == "valid", 1:2);
 validationLabels = categorical(validationSet(:, 1));
 validationDatastore = imageDatastore("valid", IncludeSubfolders=true, Labels=validationLabels);
-resizedValidationDatastore = augmentedImageDatastore(inputSize, validationDatastore, ColorPreprocessing="gray2rgb");
 
-%% Loading the test set
-display("Loading the test set")
 testSet = labelsMatrix(labelsMatrix(:, 4) == "test", 1:2);
 testLabels = categorical(testSet(:, 1));
 testDatastore = imageDatastore("test", IncludeSubfolders=true, Labels=testLabels);
-resizedTestDatastore = augmentedImageDatastore(inputSize, testDatastore, ColorPreprocessing="gray2rgb");
 
-%% Training the network
-display("Training the network")
-layersTransfer = net.Layers(1:end-3);
-layersTransfer = freezeWeights(layersTransfer);
-numClasses = 100;
-layers = [layersTransfer
-          fullyConnectedLayer(numClasses, WeightLearnRateFactor=20, BiasLearnRateFactor=20);
-          softmaxLayer
-          classificationLayer];
-options = trainingOptions("sgdm", ...
-                          "MiniBatchSize", 32, ... 
-                          "MaxEpochs", 10, ...
-                          "InitialLearnRate", 1e-4, ...
-                          "Shuffle", "every-epoch", ...
-                          "ValidationData", resizedValidationDatastore, ...
-                          "ValidationFrequency", 200, ...    
-                          "Verbose", false, ...
-                          "Plots", "training-progress");
-                         %"ExecutionEnvironment", "gpu", ...
-% MiniBatchSize: possibile alzare 64 o 128 in base all'HW. più alto valore più dati alla scheda video
-% ValidationFrequency: ogni X (3 prima) mini-batch, MATLAB interrompe il training per testare l'intera rete sul validation set. 
-% Se hai migliaia di immagini, con un batch size di 10, fai centinaia di validazioni per epoca. 
-% Consiglio: Imposta la frequenza in modo che avvenga una volta sola (o al massimo due) per epoca.
-% Calcolo: Se hai ad esempio 2000 immagini e un batch size di 64, un'epoca dura circa 2000 / 64 circa iterazioni. Imposta ValidationFrequency a 30.
-                        
-model = trainNetwork(resizedTrainingDatastore, layers, options);
-
-%% Evaluation
-display("Evaluation")
-[predictedLabels, scores] = classify(model, resizedTestDatastore);
-
-% Computing accuracy
-numel(find(predictedLabels == testLabels)) / numel(predictedLabels)
-
-
-%%==============================================================
-%% TASK 2 OTTIMIZZATO - ENHANCEMENT SOFT + FINETUNING FORTE
-%%==============================================================
-display("=== TASK 2 OTTIMIZZATO: Test set degradato ===")
-
-%% 2.1 Caricamento test set degradato
 testDegradedSet = labelsMatrix(labelsMatrix(:, 4) == "test", 1:2);
 testDegradedLabels = categorical(testDegradedSet(:, 1));
 testDegradedDatastore = imageDatastore("test_degradato", IncludeSubfolders=true, Labels=testDegradedLabels);
-resizedTestDegraded = augmentedImageDatastore(inputSize, testDegradedDatastore, ColorPreprocessing="gray2rgb");
+testDegradedFiles = testDegradedDatastore.Files;
+n_test_degraded = length(testDegradedFiles);
 
-%% Test RAW PRIMA (baseline)
-display("Test degraded RAW (modello originale)");
-[predRaw, ~] = classify(model, resizedTestDegraded);
-accRaw = mean(predRaw == testDegradedLabels);
-fprintf('Accuracy test degraded RAW: %.3f\n', accRaw);
+%% MODELLO 1
 
-%% APPROCCIO 1: ENHANCEMENT SOFT (non distruttivo)
-display("Approccio 1: Enhancement SOFT unsupervised")
+layers1 = [layersTransfer_M1
+           fullyConnectedLayer(numClasses, "WeightLearnRateFactor", 20, "BiasLearnRateFactor", 20)
+           softmaxLayer
+           classificationLayer];
 
-function enhancedImg = enhanceSingleImageSoft(imgPath, targetSize)
-    img = imread(imgPath);
-    if size(img, 3) == 1
-        img = cat(3, img, img, img);
-    end
-    img = imresize(img, targetSize(1:2));
-    img = im2double(img);
-    
-    % ENHANCEMENT MOLTO LEGGERO (non distruttivo)
-    % 1. Contraste enhancement (CLAHE)
-    lab = rgb2lab(img);
-    lab(:,:,1) = adapthisteq(lab(:,:,1), 'ClipLimit', 0.03, 'Distribution', 'rayleigh');
-    img_enhanced = lab2rgb(lab);
-    
-    % 2. Denoising MOLTO leggero (Gaussian 3x3)
-    h = fspecial('gaussian', [3 3], 0.8);
-    denoised = imfilter(img_enhanced, h, 'replicate');
-    
-    % 3. Wiener con PSF MOLTO piccola
-    psf = fspecial('gaussian', [5 5], 0.8);
-    noiseVar = 0.005;  % MOLTO basso
-    enhancedImg = deconvwnr(denoised, psf, noiseVar);
-    enhancedImg = mat2gray(enhancedImg);
-end
+pixelRange = [-10 10];
+imageAugmenterStandard = imageDataAugmenter( ...
+    "RandXReflection", true, ...
+    "RandXTranslation", pixelRange, ...
+    "RandYTranslation", pixelRange, ...
+    "RandRotation", [-20 20], ...
+    "RandScale", [0.8 1.2]);
 
-% Processa con enhancement soft
-display("Applicazione enhancement SOFT...");
-numImages = numel(testDegradedDatastore.Files);
-enhancedImages = cell(numImages, 1);
-for i = 1:numImages
-    if mod(i, 100) == 0
-        fprintf('Processate %d/500 immagini...\n', i);
-    end
-    imgPath = testDegradedDatastore.Files{i};
-    enhancedImages{i} = enhanceSingleImageSoft(imgPath, inputSize);
-end
+augimdsTrain1 = augmentedImageDatastore(sz(1:2), subsetDatastore, ...
+    ColorPreprocessing="gray2rgb", DataAugmentation=imageAugmenterStandard);
 
-enhancedArray4D = cat(4, enhancedImages{:});
-[predEnhanced, ~] = classify(model, enhancedArray4D);
-accEnhanced = mean(predEnhanced == testDegradedLabels);
-fprintf('Accuracy test degraded ENHANCED SOFT: %.3f\n', accEnhanced);
+augimdsVal = augmentedImageDatastore(sz(1:2), validationDatastore, ColorPreprocessing="gray2rgb");
 
-%% APPROCCIO 2: FINETUNING FORTE (migliore)
-display("Approccio 2: Finetuning FORTE per degradazioni");
-
-% Data augmentation PIÙ aggressiva per degradazioni
-degradationAugmenter = imageDataAugmenter( ...
-    'RandRotation', [-15, 15], ...
-    'RandXReflection', true, ...
-    'RandXTranslation', [-8, 8], ...
-    'RandYTranslation', [-8, 8], ...
-    'RandScale', [0.85, 1.15], ...
-    'RandXShear', [-0.1, 0.1], ...
-    'RandYShear', [-0.1, 0.1]);
-
-degradedTrainingDatastore = augmentedImageDatastore(inputSize, subsetDatastore, ...
-    ColorPreprocessing="gray2rgb", DataAugmentation=degradationAugmenter);
-
-% FINETUNING PIÙ PROFONDO: sblocca ANCHE conv layers finali
-layersFinetune = net.Layers(1:end-8);  % Più layer congelati
-layersFinetune = freezeWeights(layersFinetune);  % Solo ULTIMI trainable
-
-finetuneLayers = [layersFinetune
-                  net.Layers(end-7:end-4)  % fc6 + fc7 trainable
-                  fullyConnectedLayer(numClasses, WeightLearnRateFactor=5, BiasLearnRateFactor=5)
-                  softmaxLayer
-                  classificationLayer];
-
-optionsFinetune = trainingOptions("sgdm", ...
-    "MiniBatchSize", 32, ...      % Batch originale
-    "MaxEpochs", 8, ...           % Più epoche
-    "InitialLearnRate", 1e-4, ... % LR più alto
-    "LearnRateSchedule", "piecewise", ...
-    "LearnRateDropFactor", 0.5, ...
-    "LearnRateDropPeriod", 4, ...
+options1 = trainingOptions("sgdm", ...
+    "MiniBatchSize", 64, ...
+    "MaxEpochs", 15, ...
+    "InitialLearnRate", 1e-4, ...
+    "LearnRateSchedule", 'piecewise', ...
+    "LearnRateDropPeriod", 5, ...
+    "LearnRateDropFactor", 0.1, ...
     "Shuffle", "every-epoch", ...
-    "ValidationData", resizedValidationDatastore, ...
-    "ValidationFrequency", 150, ...
+    "ValidationData", augimdsVal, ...
+    "ValidationFrequency", 200, ...
     "Verbose", false, ...
     "Plots", "training-progress");
 
-modelFinetuned = trainNetwork(degradedTrainingDatastore, finetuneLayers, optionsFinetune);
+model1 = trainNetwork(augimdsTrain1, layers1, options1);
 
-[predFinetuned, ~] = classify(modelFinetuned, resizedTestDegraded);
-accFinetuned = mean(predFinetuned == testDegradedLabels);
-fprintf('Accuracy test degraded FINETUNED FORTE: %.3f\n', accFinetuned);
+augimdsTest = augmentedImageDatastore(sz(1:2), testDatastore, ColorPreprocessing="gray2rgb");
+tic
+[lab_pred1_clean, ~] = classify(model1, augimdsTest);
+toc
+acc1_clean = mean(lab_pred1_clean == testDatastore.Labels);
+fprintf('Modello1 Test Clean: %.4f\n', acc1_clean);
 
-%% CONFRONTO OTTIMIZZATO
-fprintf('\n=== CONFRONTO TASK 2 OTTIMIZZATO ===\n');
-fprintf('Task 1 (test normale):           %.3f\n', mean(predictedLabels == testLabels));
-fprintf('Test degraded RAW:               %.3f\n', accRaw);
-fprintf('Test degraded ENHANCED SOFT:     %.3f\n', accEnhanced);
-fprintf('Test degraded FINETUNED FORTE:   %.3f\n', accFinetuned);
+%% MODELLO 2
+
+function degraded = degradeTrainingImage(img)
+    if ismatrix(img)
+        img = cat(3, img, img, img);
+    elseif size(img, 3) == 1
+        img = repmat(img, [1, 1, 3]);
+    end
+    
+    img_double = im2double(img);
+    noise = 0.01 * randn(size(img_double));
+    degraded = imgaussfilt(img_double + noise, 0.5);
+    degraded = uint8(degraded * 255);
+end
+
+display("Creating degraded training datastore...")
+
+tempDir = tempdir();
+degradedDir = fullfile(tempDir, round(rand()*1e6));
+if ~exist(degradedDir, 'dir')
+    mkdir(degradedDir);
+end
+
+n_train = numel(subsetDatastore.Files);
+degradedFiles = strings(n_train, 1);
+degradedLabels = subsetDatastore.Labels;
+
+for i = 1:n_train
+    origImg = readimage(subsetDatastore, i);
+    degradedImg = degradeTrainingImage(origImg);
+    
+    tempFile = fullfile(degradedDir, sprintf('img_%06d.jpg', i));
+    imwrite(degradedImg, tempFile);
+    degradedFiles(i) = string(tempFile);
+end
+
+subsetDegraded = imageDatastore(degradedFiles, Labels=degradedLabels);
+
+imageAugmenterAgg = imageDataAugmenter( ...
+    "RandXReflection", true, ...
+    "RandXTranslation", [-8 8], ...
+    "RandYTranslation", [-8 8], ...
+    "RandRotation", [-15 15], ...
+    "RandScale", [0.85 1.15], ...
+    "RandXShear", [-0.1 0.1]);
+
+augimdsTrain2 = augmentedImageDatastore(sz(1:2), subsetDegraded, ...
+    ColorPreprocessing="gray2rgb", DataAugmentation=imageAugmenterAgg);
+
+layers2 = [layersTransfer_M2
+           net.Layers(end-7:end-4)
+           fullyConnectedLayer(numClasses, "WeightLearnRateFactor", 5, "BiasLearnRateFactor", 5)
+           softmaxLayer
+           classificationLayer];
+
+options2 = trainingOptions("sgdm", ...
+    "MiniBatchSize", 64, ...
+    "MaxEpochs", 15, ...
+    "InitialLearnRate", 1e-4, ...
+    "LearnRateSchedule", 'piecewise', ...
+    "LearnRateDropPeriod", 5, ...
+    "LearnRateDropFactor", 0.1, ...
+    "Shuffle", "every-epoch", ...
+    "ValidationData", augimdsVal, ...
+    "ValidationFrequency", 200, ...
+    "Verbose", false, ...
+    "Plots", "training-progress");
+
+
+model2 = trainNetwork(augimdsTrain2, layers2, options2);
+
+tic
+[lab_pred2_clean, ~] = classify(model2, augimdsTest);
+toc
+acc2_clean = mean(lab_pred2_clean == testDatastore.Labels);
+
+%% TEST DEGRADATO + ENHANCEMENT
+
+function enhanced = unsupervisedEnhance(img)
+    if ismatrix(img)
+        img = cat(3, img, img, img);
+    elseif size(img, 3) == 1
+        img = repmat(img, [1, 1, 3]);
+    end
+    
+    img_double = im2double(img);
+    enhanced = imbilatfilt(img_double, 0.1, 0.1);
+    gamma = 1.2;
+    enhanced = enhanced .^ (1/gamma);
+    enhanced = uint8(enhanced * 255);
+end
+
+augimdsDegraded = augmentedImageDatastore(sz(1:2), testDegradedDatastore, ColorPreprocessing="gray2rgb");
+
+[predRaw1, ~] = classify(model1, augimdsDegraded);
+[predRaw2, ~] = classify(model2, augimdsDegraded);
+accRaw1 = mean(predRaw1 == testDegradedDatastore.Labels);
+accRaw2 = mean(predRaw2 == testDegradedDatastore.Labels);
+
+pred1_enh = categorical(repmat("", n_test_degraded, 1));
+pred2_enh = categorical(repmat("", n_test_degraded, 1));
+for i = 1:n_test_degraded
+    img = imread(testDegradedFiles{i});
+    enhanced = unsupervisedEnhance(img);
+    enhanced_resized = imresize(enhanced, sz(1:2));
+    
+    if ismatrix(enhanced_resized)
+        enhanced_resized = cat(3, enhanced_resized, enhanced_resized, enhanced_resized);
+    end
+    
+    [pred1_enh(i), ~] = classify(model1, enhanced_resized);
+    [pred2_enh(i), ~] = classify(model2, enhanced_resized);
+    if mod(i, 100) == 0, fprintf('%d/%d ', i, n_test_degraded); end
+end
+acc1_enh = mean(pred1_enh == testDegradedDatastore.Labels);
+acc2_enh = mean(pred2_enh == testDegradedDatastore.Labels);
+
+
+%% TABELLA FINALE
+fprintf('\n╔══════════════════════════════════════════════════════════════════════════════╗\n');
+fprintf('║                    CONFRONTO TASK 1 - TASK 2 COMPLETO                        ║\n');
+fprintf('╚══════════════════════════════════════════════════════════════════════════════╝\n');
+fprintf('┌────────────────────┬────────────┬──────────────┬──────────────────┐\n');
+fprintf('│ Modello            │ Test Clean │ Degr RAW    │ Degr+Enhanced     │\n');
+fprintf('├────────────────────┼────────────┼──────────────┼──────────────────┤\n');
+fprintf('│ Mod1 (Standard)    │   %.4f    │   %.4f     │     %.4f       │\n', acc1_clean, accRaw1, acc1_enh);
+fprintf('│ Mod2 (Degr+Agg)    │   %.4f    │   %.4f     │     %.4f       │\n', acc2_clean, accRaw2, acc2_enh);
+fprintf('└────────────────────┴────────────┴──────────────┴──────────────────┘\n');
+
+% Pulizia (opzionale)
+rmdir(degradedDir, 's');
+
+%% Freeze weights function
+function layers = freezeWeights(layers)
+    for ii = 1:size(layers,1)
+        props = properties(layers(ii));
+        for p = 1:numel(props)
+            propName = props{p};
+            if ~isempty(regexp(propName, 'LearnRateFactor$', 'once'))
+                layers(ii).(propName) = 0;
+            end
+        end
+    end
+end
