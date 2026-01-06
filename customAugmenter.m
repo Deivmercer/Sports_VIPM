@@ -8,9 +8,12 @@ function outputData = customAugmenter(inputData)
     for i = 1:length(imageBatch)
         image = imageBatch{i};
 
-        augmentedImage = addGaussianNoise(image, [0.01, 0.2], [0.001, 0.01]);  
-        augmentedImage = addSaltAndPepperNoise(augmentedImage, [0.001, 0.01]);
-        augmentedImage = addJPEGCompression(augmentedImage, [70, 100]);
+        augmentedImage = randomizeColors(image, [0.4, 1]);
+        augmentedImage = randomizeBrightness(augmentedImage, [0.5, 1.5]);
+        augmentedImage = addGaussianBlur(augmentedImage, [0.1, 1]);
+        % augmentedImage = addGaussianNoise(augmentedImage, [0.01, 0.2], [0.001, 0.01]);  
+        % augmentedImage = addSaltAndPepperNoise(augmentedImage, [0.0001, 0.01]);
+        % augmentedImage = addJPEGCompression(augmentedImage, [70, 100]);
 
         augmentedImageCells{i} = augmentedImage;
     end
@@ -38,6 +41,31 @@ function augmentedImage = addJPEGCompression(image, qualityRange)
     imwrite(image, tempFile, 'jpg', Quality=quality);
     augmentedImage = imread(tempFile);
     delete(tempFile);
+end
+
+function augmentedImage = addGaussianBlur(image, sigmaRange)
+    % Apply Gaussian blur to the image
+    sigma = randf(sigmaRange);
+    augmentedImage = imgaussfilt(image, sigma);
+end
+
+function augmentedImage = randomizeBrightness(image, range)
+    brightnessFactor = randf(range);
+    augmentedImage = im2double(image) * brightnessFactor;  
+    augmentedImage = min(max(augmentedImage, 0), 1);
+    augmentedImage = im2uint8(augmentedImage);
+end
+
+function augmentedImage = randomizeColors(image, range)
+    rShift = randf(range);
+    gShift = randf(range);
+    bShift = randf(range);
+    augmentedImage = im2double(image);
+    augmentedImage(:,:,1) = augmentedImage(:,:,1) * rShift;
+    augmentedImage(:,:,2) = augmentedImage(:,:,2) * gShift;
+    augmentedImage(:,:,3) = augmentedImage(:,:,3) * bShift;
+    augmentedImage = min(max(augmentedImage, 0), 1);
+    augmentedImage = im2uint8(augmentedImage);
 end
 
 function value = randf(range)
