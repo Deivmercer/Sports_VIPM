@@ -4,7 +4,7 @@ clc
 
 net = alexnet;
 sz = net.Layers(1).InputSize;
-analyzeNetwork(net)
+% analyzeNetwork(net)
 
 %% ============================================================================
 %% BLOCCO 1: PREPARAZIONE RETE
@@ -114,7 +114,7 @@ customAugmentedDatastore = transform(augimdsTrain2, @customAugmenter);
 
 layers2 = [layersTransfer_M2
            net.Layers(end-7:end-4)
-           fullyConnectedLayer(numClasses, "WeightLearnRateFactor", 5, "BiasLearnRateFactor", 5)
+           fullyConnectedLayer(numClasses, "WeightLearnRateFactor", 20, "BiasLearnRateFactor", 20)
            softmaxLayer
            classificationLayer];
 
