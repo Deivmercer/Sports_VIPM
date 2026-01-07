@@ -97,8 +97,6 @@ fprintf('Modello1 Test Clean: %.4f\n', acc1_clean);
 %% MODELLO 2
 display("Creating degraded training datastore...")
 
-subsetDegraded = imageDatastore(degradedFiles, Labels=degradedLabels);
-
 imageAugmenterAgg = imageDataAugmenter( ...
     "RandXReflection", true, ...
     "RandXTranslation", [-8 8], ...
@@ -134,7 +132,7 @@ options2 = trainingOptions("sgdm", ...
     "Plots", "training-progress");
 
 
-model2 = trainNetwork(augimdsTrain2, layers2, options2);
+model2 = trainNetwork(customAugmentedDatastore, layers2, options2);
 
 tic
 [lab_pred2_clean, ~] = classify(model2, augimdsTest);
@@ -193,9 +191,6 @@ fprintf('├────────────────────┼─�
 fprintf('│ Mod1 (Standard)    │   %.4f    │   %.4f     │     %.4f       │\n', acc1_clean, accRaw1, acc1_enh);
 fprintf('│ Mod2 (Degr+Agg)    │   %.4f    │   %.4f     │     %.4f       │\n', acc2_clean, accRaw2, acc2_enh);
 fprintf('└────────────────────┴────────────┴──────────────┴──────────────────┘\n');
-
-% Pulizia (opzionale)
-rmdir(degradedDir, 's');
 
 %% Freeze weights function
 function layers = freezeWeights(layers)
