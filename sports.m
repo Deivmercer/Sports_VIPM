@@ -1,7 +1,3 @@
-clear
-close all
-clc
-
 net = alexnet;
 analyzeNetwork(net)
 inputSize = net.Layers(1).InputSize;
@@ -39,7 +35,12 @@ imageAugmenter = imageDataAugmenter( ...
     'RandYTranslation', [-10, 10], ...
     'RandScale', [0.8, 1.2]);
 
-resizedTrainingDatastore = augmentedImageDatastore(inputSize, subsetDatastore, ColorPreprocessing="gray2rgb");
+augmentedTrainingDatastore = augmentedImageDatastore(inputSize, subsetDatastore, ColorPreprocessing="gray2rgb", ...
+     DataAugmentation=imageAugmenter);
+augmentedTrainingDatastore.MiniBatchSize = 64;
+
+% Appling the custom transformation to each image in the augmentedImageDatastore
+customAugmentedDatastore = transform(augmentedTrainingDatastore, @customAugmenter);
 
 %% Loading the validation set
 display("Loading the validation set")
@@ -86,7 +87,7 @@ options = trainingOptions("sgdm", ...
 % Calcolo: Se hai ad esempio 2000 immagini e un batch size di 64, un'epoca dura circa 2000 / 64 circa iterazioni. Imposta ValidationFrequency a 30.
                         
 
-model = trainNetwork(resizedTrainingDatastore, layers, options);
+model = trainNetwork(customAugmentedDatastore, layers, options);
 
 %% Evaluation
 display("Evaluation")
@@ -110,7 +111,7 @@ resizedDegradedDatastore = augmentedImageDatastore(inputSize, degradedDatastore,
 CM = confusionmat(testLabels, predictedLabels);
 CM = CM ./ repmat(sum(CM, 2), 1, size(CM, 2));
 accuracy = mean(diag(CM));
-figure(1), clf
+figure(2), clf
 imagesc(CM), colorbar
 title(["Accuracy: " num2str(accuracy)])
 
