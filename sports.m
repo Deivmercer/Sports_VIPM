@@ -95,40 +95,7 @@ acc1_clean = mean(lab_pred1_clean == testDatastore.Labels);
 fprintf('Modello1 Test Clean: %.4f\n', acc1_clean);
 
 %% MODELLO 2
-
-function degraded = degradeTrainingImage(img)
-    if ismatrix(img)
-        img = cat(3, img, img, img);
-    elseif size(img, 3) == 1
-        img = repmat(img, [1, 1, 3]);
-    end
-    
-    img_double = im2double(img);
-    noise = 0.01 * randn(size(img_double));
-    degraded = imgaussfilt(img_double + noise, 0.5);
-    degraded = uint8(degraded * 255);
-end
-
 display("Creating degraded training datastore...")
-
-tempDir = tempdir();
-degradedDir = fullfile(tempDir, round(rand()*1e6));
-if ~exist(degradedDir, 'dir')
-    mkdir(degradedDir);
-end
-
-n_train = numel(subsetDatastore.Files);
-degradedFiles = strings(n_train, 1);
-degradedLabels = subsetDatastore.Labels;
-
-for i = 1:n_train
-    origImg = readimage(subsetDatastore, i);
-    degradedImg = degradeTrainingImage(origImg);
-    
-    tempFile = fullfile(degradedDir, sprintf('img_%06d.jpg', i));
-    imwrite(degradedImg, tempFile);
-    degradedFiles(i) = string(tempFile);
-end
 
 subsetDegraded = imageDatastore(degradedFiles, Labels=degradedLabels);
 
@@ -140,8 +107,12 @@ imageAugmenterAgg = imageDataAugmenter( ...
     "RandScale", [0.85 1.15], ...
     "RandXShear", [-0.1 0.1]);
 
-augimdsTrain2 = augmentedImageDatastore(sz(1:2), subsetDegraded, ...
+augimdsTrain2 = augmentedImageDatastore(sz(1:2), subsetDatastore, ...
     ColorPreprocessing="gray2rgb", DataAugmentation=imageAugmenterAgg);
+augimdsTrain2.MiniBatchSize = 64;
+
+% Appling the custom transformation to each image in the augmentedImageDatastore
+customAugmentedDatastore = transform(augimdsTrain2, @customAugmenter);
 
 layers2 = [layersTransfer_M2
            net.Layers(end-7:end-4)

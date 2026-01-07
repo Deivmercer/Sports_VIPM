@@ -5,3 +5,4 @@ train/
 valid/
 sports_labels.csv
 *.asv
+temp_compressed*.jpg
