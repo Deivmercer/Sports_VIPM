@@ -1,6 +1,7 @@
 *.zip
 test/
 test_degradato/
+test_videos/
 train/
 valid/
 sports_labels.csv
