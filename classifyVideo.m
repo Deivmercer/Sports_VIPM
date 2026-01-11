@@ -1,47 +1,68 @@
 clear all
 
+%% Sampling videos
 SAMPLE_PERCENTAGE = 10;
+files = dir("test_videos");
+frames = [];
+labels = [];
+tmpFolders = [];
 
-%% Load video
-video = VideoReader("test_videos\7_Xu5eMPIQCCY.webm");
-if video.Duration == 0 || hasFrame(video) == false
-    error("Invalid video.")
-end
+for i = 1:numel(files)
 
-video.CurrentTime = 0;
+    % Skipping '.' and '..'
+    if files(i).isdir
+        continue
+    end
 
-label = split(video.Name, '_');
-label = label(1);
-label = str2num(label{1});
+    display("Sampling " + files(i).name)
 
-%% Sampling frames
-totalFrames = floor(video.Duration * video.FrameRate);
-framesToSample = floor(totalFrames * SAMPLE_PERCENTAGE / 100);
-stepSize = floor(totalFrames / framesToSample);
+    % Loading video
+    video = VideoReader("test_videos\" + files(i).name);
+    if video.Duration == 0 || hasFrame(video) == false
+        error("Invalid video.")
+    end
+    video.CurrentTime = 0;
 
-[~, tmpFolderName, ~] = fileparts(video.Name);
-tmpFolderName = "test_videos\" + tmpFolderName;
-mkdir(tmpFolderName);
-tmpFileNames = cell(1, numel(framesToSample));
+    % Creating 
+    [~, tmpFolderName, ~] = fileparts(video.Name);
+    tmpFolderName = "test_videos\" + tmpFolderName;
+    if ~exist(tmpFolderName, 'dir')
+        mkdir(tmpFolderName);
+        tmpFolders = [tmpFolders tmpFolderName];
+    end
 
-for i = 1:framesToSample
-    video.CurrentTime = (i - 1) * stepSize / video.FrameRate;
-    frame = readFrame(video);
+    % Sampling frames
+    totalFrames = floor(video.Duration * video.FrameRate);
+    framesToSample = floor(totalFrames * SAMPLE_PERCENTAGE / 100);
+    stepSize = floor(totalFrames / framesToSample);
+    
+    for j = 1:framesToSample
+        tmpFileName = tmpFolderName + filesep + "frame_" + j + ".png";
 
-    tmpFileName = tmpFolderName + filesep + "frame_" + i + ".png";
-        
-    imwrite(frame, tmpFileName);
-    tmpFileNames{i} = tmpFileName;
+        if ~exist(tmpFileName, 'file')
+            video.CurrentTime = (j - 1) * stepSize / video.FrameRate;
+            frame = readFrame(video);
+            imwrite(frame, tmpFileName);
+        end
+
+        frames = [frames tmpFileName];
+    end
+
+    % Adding frame labels
+    label = split(video.Name, '_');
+    label = label(1);
+    label = str2num(label{1});
+    tmp_labels = label * ones(framesToSample, 1);
+    tmp_labels = categorical(tmp_labels);
+    labels = [labels; tmp_labels];
 end
 
 %% Creating augmented image datastore
-labels = label * ones(framesToSample, 1);
-labels = categorical(labels);
-datastore = imageDatastore(tmpFolderName, Labels=labels);
+datastore = imageDatastore(frames, Labels=labels);
 resizedDatastore = augmentedImageDatastore([227, 227, 3], datastore, ColorPreprocessing="gray2rgb");
 
 %% Loading model
-load 'modello task1 91.mat'
+load 'model.mat'
 
 %% Classify frames
 [predictedLabels, scores] = classify(model, resizedDatastore);
@@ -49,8 +70,12 @@ load 'modello task1 91.mat'
 % Computing accuracy
 numel(find(predictedLabels == labels)) / numel(predictedLabels)
 
-%% Cleaning up temporary folder
-for i = 1:numel(tmpFileNames)
-    delete(tmpFileNames{i});
+%% Cleaning up temporary folders
+if size(tmpFolders, 2) > 0
+    for i = 1:numel(frames)
+        delete(frames(i));
+    end
+    for i = 1:numel(tmpFolders)
+        rmdir(tmpFolders(i));
+    end
 end
-rmdir(tmpFolderName);
