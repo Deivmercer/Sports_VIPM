@@ -150,12 +150,21 @@ function enhanced = unsupervisedEnhance(img)
     elseif size(img, 3) == 1
         img = repmat(img, [1, 1, 3]);
     end
-    
+
     img_double = im2double(img);
-    enhanced = imbilatfilt(img_double, 0.1, 0.1);
-    gamma = 1.2;
-    enhanced = enhanced .^ (1/gamma);
-    enhanced = uint8(enhanced * 255);
+
+    img_denoised = imbilatfilt(img_double, 0.1, 0.1);
+
+    YCbCr = rgb2ycbcr(img_denoised);
+    Y = YCbCr(:,:,1);
+    mask = 1 - Y;
+    mask = imbilatfilt(mask, 4, 2);
+    gammaLocal = 2 .^ ((0.5 - mask) / 0.5);
+    Y_enhanced = Y .^ gammaLocal;
+    YCbCr(:,:,1) = Y_enhanced;
+    enhanced_double = ycbcr2rgb(YCbCr);
+    
+    enhanced = uint8(enhanced_double * 255);
 end
 
 augimdsDegraded = augmentedImageDatastore(sz(1:2), testDegradedDatastore, ColorPreprocessing="gray2rgb");
