@@ -102,9 +102,9 @@ for ii = 1:length(layers)
         acc_svm = mean(pred_svm == labels_te);
 
         %% Accumula risultati
-        results = [results; {layers{ii}, normalize, '1-NN', acc_1nn};
+        results = [{layers{ii}, normalize, '1-NN', acc_1nn};
             {layers{ii}, normalize, 'K-NN', acc_knn};
-            {layers{ii}, normalize, 'SVM',  acc_svm}];
+            {layers{ii}, normalize, 'SVM',  acc_svm}]
 
         normalize = true;
     end
